@@ -39,11 +39,18 @@ const arrays = await Promise.all(FEEDS.map(f => getFeed(f.url, f.name)));
 const entries = arrays.flat()
   .filter(e => e.link && e.title)
   .sort((a, b) => b.date.getTime() - a.date.getTime())
-  .slice(0, 50);
+  .slice(0, 100); // keep up to 100 ready for "Load more"
 
 function fmt(d: Date) {
-  return d && !isNaN(+d) ? d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '';
+  return d && !isNaN(+d)
+    ? d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' })
+    : '';
 }
+
+// Server-render first chunk for SEO & fast paint
+const INITIAL_SIZE = 10;
+const initial = entries.slice(0, INITIAL_SIZE);
+const remaining = entries.slice(INITIAL_SIZE);
 ---
 <!doctype html>
 <html lang="en">
@@ -55,8 +62,9 @@ function fmt(d: Date) {
     <main style="max-width:960px;margin:0 auto;padding:2rem 1rem 4rem">
       <h1>🧠 AI × Design — Fresh Reads</h1>
       <p style="opacity:.8;margin:.25rem 0 1.5rem">Curated posts from top AI + Design sources.</p>
-      <ul style="list-style:none;margin:0;padding:0;display:grid;gap:1rem">
-        {entries.map((e) => (
+
+      <ul id="feed-list" style="list-style:none;margin:0;padding:0;display:grid;gap:1rem">
+        {initial.map((e) => (
           <li style="padding:1rem;border:1px solid #e5e7eb;border-radius:12px;background:#fff">
             <a href={e.link} target="_blank" rel="noopener noreferrer" style="font-weight:600;text-decoration:none">{e.title}</a>
             <div style="margin-top:.35rem;font-size:.9rem;opacity:.8;display:flex;gap:.5rem;align-items:center">
@@ -66,6 +74,55 @@ function fmt(d: Date) {
           </li>
         ))}
       </ul>
+
+      {remaining.length > 0 && (
+        <div style="text-align:center;margin-top:2rem;">
+          <button id="load-more"
+            style="background:#2563eb;color:#fff;font-weight:700;padding:.75rem 1.5rem;border:none;border-radius:999px;cursor:pointer;box-shadow:0 2px 8px rgba(37,99,235,.25)">
+            Load more ↓
+          </button>
+        </div>
+      )}
+
+      <!-- Pass the remaining items to the browser as JSON -->
+      <script id="remaining-json" type="application/json">
+        {JSON.stringify(remaining.map(e => ({
+          title: e.title, link: e.link, date: e.date.toISOString(), source: e.source
+        })))}
+      </script>
+
+      <script type="module">
+        const btn = document.getElementById('load-more');
+        if (btn) {
+          const list = document.getElementById('feed-list');
+          const dataEl = document.getElementById('remaining-json');
+          const remaining = JSON.parse(dataEl.textContent || '[]');
+
+          let shown = 0;
+          const STEP = 10; // how many per click
+
+          function renderMore() {
+            const slice = remaining.slice(shown, shown + STEP);
+            for (const e of slice) {
+              const li = document.createElement('li');
+              li.style.cssText = "padding:1rem;border:1px solid #e5e7eb;border-radius:12px;background:#fff";
+              li.innerHTML = `
+                <a href="${e.link}" target="_blank" rel="noopener noreferrer" style="font-weight:600;text-decoration:none">
+                  ${e.title}
+                </a>
+                <div style="margin-top:.35rem;font-size:.9rem;opacity:.8;display:flex;gap:.5rem;align-items:center">
+                  <span style="padding:.15rem .5rem;border:1px solid #e5e7eb;border-radius:999px">${e.source}</span>
+                  <time datetime="${e.date}">${new Date(e.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}</time>
+                </div>`;
+              list.appendChild(li);
+            }
+            shown += slice.length;
+            if (shown >= remaining.length) btn.style.display = 'none';
+          }
+
+          btn.addEventListener('click', renderMore);
+        }
+      </script>
     </main>
     <Footer />
   </body>
