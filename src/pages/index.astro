@@ -2,126 +2,346 @@
 import BaseHead from '../components/BaseHead.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
+import '../styles/theme.css';
 
 // ⬇️ dynamic import avoids bundling issues
 const { default: Parser } = await import('rss-parser');
+
+type Entry = {
+  title: string;
+  link: string;
+  date: Date;
+  source: string;
+  image?: string | null;
+  category?: string | null;
+  summary?: string | null;
+  minutes?: number | null;
+};
 
 const FEEDS: { name: string; url: string }[] = [
   { name: 'UX Collective', url: 'https://uxdesign.cc/feed' },
   { name: 'OpenAI Blog', url: 'https://openai.com/blog/rss.xml' },
   { name: 'Google AI Blog', url: 'https://ai.googleblog.com/feeds/posts/default?alt=rss' },
-  { name: 'Smashing Magazine – AI', url: 'https://www.smashingmagazine.com/tag/ai/feed/' }
+  { name: 'Smashing Magazine – AI', url: 'https://www.smashingmagazine.com/tag/ai/feed/' },
 ];
-
-type Entry = { title: string; link: string; date: Date; source: string };
 
 const parser = new Parser({
   timeout: 15000,
-  headers: { 'User-Agent': 'aidesignfeeds.com (Astro RSS Aggregator)' }
+  headers: { 'User-Agent': 'aidesignfeeds.com (Astro RSS Aggregator)' },
 });
+
+// ---------------- helpers ----------------
+function normalizeUrl(raw?: string | null) {
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','utm_id','gclid','fbclid','igshid'].forEach(p => u.searchParams.delete(p));
+    if (u.pathname !== '/' && u.pathname.endsWith('/')) u.pathname = u.pathname.slice(0, -1);
+    return u.toString();
+  } catch {
+    return raw || '';
+  }
+}
+
+function parseDate(item: any): Date {
+  const cands = [item.isoDate, item.pubDate, item.updated, item.published, item?.dc?.date].filter(Boolean);
+  for (const d of cands) {
+    const dt = new Date(d);
+    if (!isNaN(+dt)) return dt;
+  }
+  return new Date(0);
+}
+
+function pickImage(item: any): string | null {
+  if (item.enclosure?.url) return item.enclosure.url;
+  const m1 = item['media:content']?.url || item['media:content']?.$?.url;
+  if (m1) return m1;
+  const m2 = item['media:thumbnail']?.url || item['media:thumbnail']?.$?.url;
+  if (m2) return m2;
+  const html = item['content:encoded'] || item.content || '';
+  const match = typeof html === 'string' ? html.match(/<img[^>]+src=["']([^"']+)["']/i) : null;
+  if (match?.[1]) return match[1];
+  if (item.image) return item.image;
+  return null;
+}
+
+function textOnly(htmlOrText: string | undefined): string {
+  if (!htmlOrText) return '';
+  const txt = htmlOrText.replace?.(/<[^>]+>/g, '') ?? htmlOrText;
+  return txt.replace(/\s+/g, ' ').trim();
+}
+
+function estimateMinutes(text: string | undefined): number | null {
+  if (!text) return null;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.round(words / 220)) || 1;
+}
+
+function firstCategory(item: any): string | null {
+  const cats = Array.isArray(item.categories) ? item.categories : (item.category ? [item.category] : []);
+  if (!cats?.length) return null;
+  return String(cats[0]).trim() || null;
+}
 
 async function getFeed(url: string, source: string): Promise<Entry[]> {
   try {
     const feed = await parser.parseURL(url);
-    return (feed.items || []).map((item) => ({
-      title: (item.title || 'Untitled').trim(),
-      link: item.link || '#',
-      date: item.isoDate ? new Date(item.isoDate) :
-            item.pubDate ? new Date(item.pubDate) : new Date(0),
-      source
-    }));
+    return (feed.items || []).map((item: any) => {
+      const summary = textOnly(item.contentSnippet || item.summary || item['content:encoded'] || item.content || '');
+      return {
+        title: (item.title || 'Untitled').trim(),
+        link: normalizeUrl(item.link || '#'),
+        date: parseDate(item),
+        source,
+        image: pickImage(item),
+        category: firstCategory(item),
+        summary,
+        minutes: estimateMinutes(summary),
+      };
+    });
   } catch {
     return [];
   }
 }
 
 const arrays = await Promise.all(FEEDS.map(f => getFeed(f.url, f.name)));
-const entries = arrays.flat()
-  .filter(e => e.link && e.title)
-  .sort((a, b) => b.date.getTime() - a.date.getTime())
-  .slice(0, 100); // keep up to 100 ready for "Load more"
 
-function fmt(d: Date) {
+// de-dupe
+const seen = new Set<string>();
+const all = arrays.flat()
+  .filter(e => e.link && e.title)
+  .filter(e => {
+    const key = `${e.title.toLowerCase()}::${e.link}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })
+  .sort((a, b) => b.date.getTime() - a.date.getTime());
+
+const entries = all.slice(0, 100);
+
+// Formatters
+function fmtDate(d: Date) {
   return d && !isNaN(+d)
     ? d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' })
     : '';
 }
 
-// Server-render first chunk for SEO & fast paint
-const INITIAL_SIZE = 10;
-const initial = entries.slice(0, INITIAL_SIZE);
-const remaining = entries.slice(INITIAL_SIZE);
+// split: hero + list
+const HERO = entries[0];
+const LIST = entries.slice(1);
+
+// paginate list client-side
+const INITIAL_SIZE = 6; // show 6 under "Latest Stories" before load more
+const initial = LIST.slice(0, INITIAL_SIZE);
+const remaining = LIST.slice(INITIAL_SIZE);
 ---
 <!doctype html>
-<html lang="en">
+<html lang="en" class="scroll-smooth">
   <head>
-    <BaseHead title="AI × Design — Fresh Reads" description="Curated posts at the intersection of AI and Design." />
+    <BaseHead title="AI Design Feeds" description="Design × Technology × Innovation — fresh reads at the intersection of AI and Design." />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>
-  <body>
+  <body class="bg-background text-foreground">
     <Header />
-    <main style="max-width:960px;margin:0 auto;padding:2rem 1rem 4rem">
-      <h1>🧠 AI × Design — Fresh Reads</h1>
-      <p style="opacity:.8;margin:.25rem 0 1.5rem">Curated posts from top AI + Design sources.</p>
 
-      <ul id="feed-list" style="list-style:none;margin:0;padding:0;display:grid;gap:1rem">
-        {initial.map((e) => (
-          <li style="padding:1rem;border:1px solid #e5e7eb;border-radius:12px;background:#fff">
-            <a href={e.link} target="_blank" rel="noopener noreferrer" style="font-weight:600;text-decoration:none">{e.title}</a>
-            <div style="margin-top:.35rem;font-size:.9rem;opacity:.8;display:flex;gap:.5rem;align-items:center">
-              <span style="padding:.15rem .5rem;border:1px solid #e5e7eb;border-radius:999px">{e.source}</span>
-              <time datetime={e.date.toISOString()}>{fmt(e.date)}</time>
+    <!-- Top rail -->
+    <div class="w-full bg-primary text-primary-foreground">
+      <div class="mx-auto max-w-6xl px-4 py-2 text-xs flex items-center gap-6 justify-between">
+        <div class="opacity-90">Monday, {new Date().toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' })}</div>
+        <div class="opacity-90">Vol. 1, Issue {String(new Date().getDate()).padStart(2,'0')}</div>
+      </div>
+    </div>
+
+    <main class="mx-auto max-w-6xl px-4 pb-16 pt-8">
+      <!-- Masthead -->
+      <div class="text-center py-4">
+        <h1 class="text-4xl font-semibold tracking-tight">AI Design Feeds</h1>
+        <p class="mt-1 text-muted-foreground uppercase tracking-[0.2em] text-xs">Design × Technology × Innovation</p>
+      </div>
+
+      <!-- Nav -->
+      <nav class="mt-6 border-t border-border">
+        <ul class="flex flex-wrap gap-6 py-3 text-sm">
+          <li><a class="hover:underline" href="#latest">Latest</a></li>
+          <li><a class="hover:underline" href="#">Featured</a></li>
+          <li><a class="hover:underline" href="#">AI</a></li>
+          <li><a class="hover:underline" href="#">Design</a></li>
+          <li><a class="hover:underline" href="#">Sustainability</a></li>
+          <li><a class="hover:underline" href="#">Opinion</a></li>
+        </ul>
+      </nav>
+
+      <!-- Hero / Editor's Pick -->
+      {HERO && (
+        <section class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+          <div class="rounded-xl overflow-hidden border border-border bg-card">
+            <a href={HERO.link} target="_blank" rel="noopener noreferrer" aria-label={`Open: ${HERO.title}`}>
+              {HERO.image ? (
+                <img src={HERO.image} alt="" class="w-full aspect-[16/10] object-cover" loading="eager" decoding="async" />
+              ) : (
+                <div class="w-full aspect-[16/10] bg-muted" />
+              )}
+            </a>
+          </div>
+          <div class="p-2">
+            {HERO.category && (
+              <span class="inline-flex items-center rounded-md border border-border px-2 py-1 text-xs uppercase tracking-wide bg-secondary text-secondary-foreground">{
+                HERO.category
+              }</span>
+            )}
+            <h2 class="mt-3 text-3xl font-semibold leading-tight">
+              <a class="hover:underline" href={HERO.link} target="_blank" rel="noopener noreferrer">{HERO.title}</a>
+            </h2>
+            {HERO.summary && <p class="mt-3 text-muted-foreground">{HERO.summary}</p>}
+            <div class="mt-3 flex items-center gap-3 text-sm text-muted-foreground">
+              <span class="inline-flex items-center rounded-full border border-border px-2 py-0.5">{HERO.source}</span>
+              <time datetime={HERO.date.toISOString()}>{fmtDate(HERO.date)}</time>
+              {HERO.minutes && <span aria-hidden>•</span>}
+              {HERO.minutes && <span>{HERO.minutes} min read</span>}
             </div>
-          </li>
-        ))}
-      </ul>
-
-      {remaining.length > 0 && (
-        <div style="text-align:center;margin-top:2rem;">
-          <button id="load-more"
-            style="background:#2563eb;color:#fff;font-weight:700;padding:.75rem 1.5rem;border:none;border-radius:999px;cursor:pointer;box-shadow:0 2px 8px rgba(37,99,235,.25)">
-            Load more ↓
-          </button>
-        </div>
+            <div class="mt-5">
+              <a href={HERO.link} target="_blank" rel="noopener noreferrer" class="inline-flex items-center rounded-full bg-primary text-primary-foreground px-4 py-2 font-semibold shadow-sm">
+                Continue Reading
+              </a>
+            </div>
+          </div>
+        </section>
       )}
+
+      <!-- Divider -->
+      <hr class="my-10 border-border" />
+
+      <!-- Latest + Sidebar -->
+      <section id="latest" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- List -->
+        <div class="lg:col-span-2">
+          <h3 class="text-2xl font-semibold mb-6">Latest Stories</h3>
+          <ul id="feed-list" class="space-y-6">
+            {initial.map((e) => (
+              <li class="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-4 border-b border-border pb-6">
+                <a href={e.link} target="_blank" rel="noopener noreferrer" class="block rounded-lg overflow-hidden bg-card border border-border">
+                  {e.image ? (
+                    <img class="w-full h-[120px] object-cover" src={e.image} alt="" loading="lazy" decoding="async" />
+                  ) : (
+                    <div class="w-full h-[120px] bg-muted" />
+                  )}
+                </a>
+                <div>
+                  {e.category && (
+                    <span class="inline-flex items-center rounded-md border border-border px-2 py-1 text-xs uppercase tracking-wide bg-accent text-accent-foreground">{e.category}</span>
+                  )}
+                  <h4 class="mt-2 text-xl font-semibold leading-snug">
+                    <a class="hover:underline" href={e.link} target="_blank" rel="noopener noreferrer">{e.title}</a>
+                  </h4>
+                  {e.summary && <p class="mt-2 text-muted-foreground">{e.summary}</p>}
+                  <div class="mt-3 flex items-center gap-3 text-sm text-muted-foreground">
+                    <span class="inline-flex items-center rounded-full border border-border px-2 py-0.5">{e.source}</span>
+                    <time datetime={e.date.toISOString()}>{fmtDate(e.date)}</time>
+                    {e.minutes && <span aria-hidden>•</span>}
+                    {e.minutes && <span>{e.minutes} min read</span>}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {remaining.length > 0 && (
+            <div class="text-center mt-8">
+              <button id="load-more" class="inline-flex items-center rounded-full bg-primary text-primary-foreground px-5 py-2.5 font-semibold shadow-sm">
+                Load more ↓
+              </button>
+            </div>
+          )}
+        </div>
+
+        <!-- Sidebar -->
+        <aside class="lg:col-span-1 space-y-8">
+          <!-- Subscribe card -->
+          <div class="rounded-xl border border-border bg-card p-6 shadow">
+            <h5 class="text-lg font-semibold">Subscribe to our newsletter</h5>
+            <p class="mt-2 text-muted-foreground">Get the latest articles delivered to your inbox every week.</p>
+            <form class="mt-4 grid grid-cols-1 gap-3" onsubmit="event.preventDefault()">
+              <input class="w-full rounded-md border border-border bg-[var(--color-input-background)] px-3 py-2" type="email" placeholder="Your email" />
+              <button class="rounded-md bg-primary text-primary-foreground px-4 py-2 font-semibold">Subscribe</button>
+            </form>
+          </div>
+
+          <!-- Trending (top 2 by recency) -->
+          <div class="rounded-xl border border-border bg-card p-6 shadow">
+            <h5 class="text-lg font-semibold">Trending Now</h5>
+            <ol class="mt-4 space-y-3">
+              {entries.slice(0, 2).map((e, i) => (
+                <li class="flex items-start gap-3">
+                  <span class="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-secondary-foreground text-sm font-semibold">{i+1}</span>
+                  <div class="min-w-0">
+                    <a href={e.link} target="_blank" rel="noopener noreferrer" class="hover:underline font-medium">{e.title}</a>
+                    {e.minutes && <div class="text-xs text-muted-foreground mt-0.5">{e.minutes} min read</div>}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </aside>
+      </section>
 
       <!-- Pass the remaining items to the browser as JSON -->
       <script id="remaining-json" type="application/json">
         {JSON.stringify(remaining.map(e => ({
-          title: e.title, link: e.link, date: e.date.toISOString(), source: e.source
+          title: e.title,
+          link: e.link,
+          date: e.date.toISOString(),
+          source: e.source,
+          image: e.image || null,
+          category: e.category || null,
+          summary: e.summary || null,
+          minutes: e.minutes || null,
         })))}
       </script>
 
       <script type="module">
         const btn = document.getElementById('load-more');
-        if (btn) {
-          const list = document.getElementById('feed-list');
-          const dataEl = document.getElementById('remaining-json');
-          const remaining = JSON.parse(dataEl.textContent || '[]');
+        const list = document.getElementById('feed-list');
+        const dataEl = document.getElementById('remaining-json');
+        const remaining = JSON.parse(dataEl?.textContent || '[]');
 
-          let shown = 0;
-          const STEP = 10; // how many per click
+        const STEP = 6;
+        let shown = 0;
 
-          function renderMore() {
-            const slice = remaining.slice(shown, shown + STEP);
-            for (const e of slice) {
-              const li = document.createElement('li');
-              li.style.cssText = "padding:1rem;border:1px solid #e5e7eb;border-radius:12px;background:#fff";
-              li.innerHTML = `
-                <a href="${e.link}" target="_blank" rel="noopener noreferrer" style="font-weight:600;text-decoration:none">
-                  ${e.title}
-                </a>
-                <div style="margin-top:.35rem;font-size:.9rem;opacity:.8;display:flex;gap:.5rem;align-items:center">
-                  <span style="padding:.15rem .5rem;border:1px solid #e5e7eb;border-radius:999px">${e.source}</span>
-                  <time datetime="${e.date}">${new Date(e.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}</time>
-                </div>`;
-              list.appendChild(li);
-            }
-            shown += slice.length;
-            if (shown >= remaining.length) btn.style.display = 'none';
-          }
-
-          btn.addEventListener('click', renderMore);
+        function itemHTML(e) {
+          return `
+            <li class="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-4 border-b border-[var(--color-border)] pb-6">
+              <a href="${e.link}" target="_blank" rel="noopener noreferrer" class="block rounded-lg overflow-hidden bg-[var(--color-card)] border border-[var(--color-border)]">
+                ${e.image ? `<img class="w-full h-[120px] object-cover" src="${e.image}" alt="" loading="lazy" decoding="async" />` : `<div class="w-full h-[120px] bg-[var(--color-muted)]"></div>`}
+              </a>
+              <div>
+                ${e.category ? `<span class="inline-flex items-center rounded-md border border-[var(--color-border)] px-2 py-1 text-xs uppercase tracking-wide bg-[var(--color-accent)] text-[var(--color-accent-foreground)]">${e.category}</span>` : ``}
+                <h4 class="mt-2 text-xl font-semibold leading-snug">
+                  <a class="hover:underline" href="${e.link}" target="_blank" rel="noopener noreferrer">${e.title}</a>
+                </h4>
+                ${e.summary ? `<p class="mt-2" style="color:var(--color-muted-foreground)">${e.summary}</p>` : ``}
+                <div class="mt-3 flex items-center gap-3 text-sm" style="color:var(--color-muted-foreground)">
+                  <span class="inline-flex items-center rounded-full border border-[var(--color-border)] px-2 py-0.5">${e.source}</span>
+                  <time datetime="${e.date}">
+                    ${new Date(e.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}
+                  </time>
+                  ${e.minutes ? `<span aria-hidden>•</span><span>${e.minutes} min read</span>` : ``}
+                </div>
+              </div>
+            </li>
+          `;
         }
+
+        function renderMore() {
+          const slice = remaining.slice(shown, shown + STEP);
+          const frag = document.createElement('template');
+          frag.innerHTML = slice.map(itemHTML).join('');
+          list.appendChild(frag.content);
+          shown += slice.length;
+          if (shown >= remaining.length && btn) btn.style.display = 'none';
+        }
+
+        if (btn) btn.addEventListener('click', renderMore);
       </script>
     </main>
     <Footer />
