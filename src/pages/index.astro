@@ -1,7 +1,7 @@
 ---
 import '../styles/theme.css';
 import BaseHead from '../components/BaseHead.astro';
-import Header from '../components/Header.astro';
+//import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 
 // ⬇️ dynamic import avoids bundling issues
@@ -83,11 +83,23 @@ function firstCategory(item: any): string | null {
   return String(cats[0]).trim() || null;
 }
 
+
+function clampWords(s: string, max = 45): string {
+  if (!s) return '';
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length <= max) return s;
+  return parts.slice(0, max).join(' ') + '…';
+}
+
+
 async function getFeed(url: string, source: string): Promise<Entry[]> {
   try {
     const feed = await parser.parseURL(url);
     return (feed.items || []).map((item: any) => {
-      const summary = textOnly(item.contentSnippet || item.summary || item['content:encoded'] || item.content || '');
+      const raw = textOnly(
+        item.contentSnippet || item.summary || item['content:encoded'] || item.content || ''
+      );
+      const summary = clampWords(raw, 45); // <-- limit words here
       return {
         title: (item.title || 'Untitled').trim(),
         link: normalizeUrl(item.link || '#'),
@@ -96,13 +108,14 @@ async function getFeed(url: string, source: string): Promise<Entry[]> {
         image: pickImage(item),
         category: firstCategory(item),
         summary,
-        minutes: estimateMinutes(summary),
+        minutes: estimateMinutes(raw), // minutes from full text (better estimate)
       };
     });
   } catch {
     return [];
   }
 }
+
 
 const arrays = await Promise.all(FEEDS.map(f => getFeed(f.url, f.name)));
 
@@ -138,12 +151,15 @@ const remaining = LIST.slice(INITIAL_SIZE);
 ---
 <!doctype html>
 <html lang="en" class="scroll-smooth">
+
   <head>
     <BaseHead title="AI Design Feeds" description="Design × Technology × Innovation — fresh reads at the intersection of AI and Design." />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>
+
+
   <body class="bg-background text-foreground">
-    <Header />
+<!-- <Header /> -->
 
     <!-- Top rail -->
     <div class="w-full bg-primary text-primary-foreground">
@@ -219,14 +235,26 @@ const remaining = LIST.slice(INITIAL_SIZE);
           <h3 class="text-2xl font-semibold mb-6">Latest Stories</h3>
           <ul id="feed-list" class="space-y-6">
             {initial.map((e) => (
-              <li class="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-4 border-b border-border pb-6">
-                <a href={e.link} target="_blank" rel="noopener noreferrer" class="block rounded-lg overflow-hidden bg-card border border-border">
-                  {e.image ? (
-                    <img class="w-full h-[120px] object-cover" src={e.image} alt="" loading="lazy" decoding="async" />
-                  ) : (
-                    <div class="w-full h-[120px] bg-muted" />
-                  )}
-                </a>
+              <li class="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-4 border-b border-border pb-6">
+              <a
+                href={e.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="block rounded-lg overflow-hidden border border-border bg-card"
+              >
+                {e.image ? (
+                  <img
+                    class="w-full h-full object-cover object-center"
+                    src={e.image}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <div class="w-full h-[120px] bg-muted" />
+                )}
+              </a>
+
                 <div>
                   {e.category && (
                     <span class="inline-flex items-center rounded-md border border-border px-2 py-1 text-xs uppercase tracking-wide bg-accent text-accent-foreground">{e.category}</span>
@@ -310,18 +338,24 @@ const remaining = LIST.slice(INITIAL_SIZE);
 
         function itemHTML(e) {
           return `
-            <li class="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-4 border-b border-[var(--color-border)] pb-6">
-              <a href="${e.link}" target="_blank" rel="noopener noreferrer" class="block rounded-lg overflow-hidden bg-[var(--color-card)] border border-[var(--color-border)]">
-                ${e.image ? `<img class="w-full h-[120px] object-cover" src="${e.image}" alt="" loading="lazy" decoding="async" />` : `<div class="w-full h-[120px] bg-[var(--color-muted)]"></div>`}
+            <li class="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-4 border-b border-[var(--border)] pb-6">
+              <a href="${e.link}" target="_blank" rel="noopener noreferrer" class="block rounded-lg overflow-hidden bg-[var(--card)] border border-[var(--border)]">
+                ${e.image ? `<img
+  class="w-full h-full object-cover object-center rounded-lg"
+  src="${e.image}"
+  alt=""
+  loading="lazy"
+  decoding="async"
+/>` : `<div class="w-full h-[120px] bg-[var(--muted)]"></div>`}
               </a>
               <div>
-                ${e.category ? `<span class="inline-flex items-center rounded-md border border-[var(--color-border)] px-2 py-1 text-xs uppercase tracking-wide bg-[var(--color-accent)] text-[var(--color-accent-foreground)]">${e.category}</span>` : ``}
+                ${e.category ? `<span class="inline-flex items-center rounded-md border border-[var(--border)] px-2 py-1 text-xs uppercase tracking-wide bg-[var(--color-accent)] ext-[var(--accent-foreground)]">${e.category}</span>` : ``}
                 <h4 class="mt-2 text-xl font-semibold leading-snug">
                   <a class="hover:underline" href="${e.link}" target="_blank" rel="noopener noreferrer">${e.title}</a>
                 </h4>
                 ${e.summary ? `<p class="mt-2" style="color:var(--color-muted-foreground)">${e.summary}</p>` : ``}
                 <div class="mt-3 flex items-center gap-3 text-sm" style="color:var(--color-muted-foreground)">
-                  <span class="inline-flex items-center rounded-full border border-[var(--color-border)] px-2 py-0.5">${e.source}</span>
+                  <span class="inline-flex items-center rounded-full border border-[var(--border)] px-2 py-0.5">${e.source}</span>
                   <time datetime="${e.date}">
                     ${new Date(e.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}
                   </time>

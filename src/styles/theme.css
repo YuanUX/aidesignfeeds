@@ -1,3 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+
 /* Theme tokens (light) */
 :root {
   --font-size: 16px;
