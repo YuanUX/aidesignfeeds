@@ -2,15 +2,13 @@
 import BaseHead from '../components/BaseHead.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import { SITE_TITLE, SITE_DESCRIPTION } from '../consts';
 import Parser from 'rss-parser';
 
 const FEEDS: { name: string; url: string }[] = [
   { name: 'UX Collective', url: 'https://uxdesign.cc/feed' },
   { name: 'OpenAI Blog', url: 'https://openai.com/blog/rss.xml' },
   { name: 'Google AI Blog', url: 'https://ai.googleblog.com/feeds/posts/default?alt=rss' },
-  { name: 'Smashing Magazine – AI', url: 'https://www.smashingmagazine.com/tag/ai/feed/' },
-  // add/remove sources here
+  { name: 'Smashing Magazine – AI', url: 'https://www.smashingmagazine.com/tag/ai/feed/' }
 ];
 
 type Entry = {
@@ -22,7 +20,7 @@ type Entry = {
 
 const parser = new Parser({
   timeout: 15000,
-  headers: { 'User-Agent': 'aidesignfeeds.com (Astro RSS Aggregator)' },
+  headers: { 'User-Agent': 'aidesignfeeds.com (Astro RSS Aggregator)' }
 });
 
 async function getFeed(url: string, source: string): Promise<Entry[]> {
@@ -31,9 +29,10 @@ async function getFeed(url: string, source: string): Promise<Entry[]> {
     return (feed.items || []).map((item) => ({
       title: (item.title || 'Untitled').trim(),
       link: item.link || '#',
-      date: item.isoDate ? new Date(item.isoDate) :
-            item.pubDate ? new Date(item.pubDate) : new Date(0),
-      source,
+      date: item.isoDate ? new Date(item.isoDate)
+           : item.pubDate ? new Date(item.pubDate)
+           : new Date(0),
+      source
     }));
   } catch (e) {
     console.error(`Failed fetching ${source}:`, e);
@@ -55,15 +54,15 @@ function fmt(d: Date) {
 
 <!doctype html>
 <html lang="en">
-	<head>
-		<BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
-	</head>
-	<body>
-		<Header />
-		<main style="max-width:960px;margin:0 auto;padding:2rem 1rem 4rem">
+  <head>
+    <BaseHead title="AI × Design — Fresh Reads" description="Curated posts at the intersection of AI and Design." />
+  </head>
+  <body>
+    <Header />
+    <main style="max-width:960px;margin:0 auto;padding:2rem 1rem 4rem">
       <h1>🧠 AI × Design — Fresh Reads</h1>
       <p style="opacity:.8;margin:.25rem 0 1.5rem">
-        Curated posts from top AI + Design sources. (Auto-updates when the site builds.)
+        Curated posts from top AI + Design sources. (Updates each deploy.)
       </p>
 
       <ul style="list-style:none;margin:0;padding:0;display:grid;gap:1rem">
@@ -79,7 +78,7 @@ function fmt(d: Date) {
           </li>
         ))}
       </ul>
-		</main>
-		<Footer />
-	</body>
+    </main>
+    <Footer />
+  </body>
 </html>
