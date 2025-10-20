@@ -2,7 +2,9 @@
 import BaseHead from '../components/BaseHead.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import Parser from 'rss-parser';
+
+// ⬇️ dynamic import avoids bundling issues
+const { default: Parser } = await import('rss-parser');
 
 const FEEDS: { name: string; url: string }[] = [
   { name: 'UX Collective', url: 'https://uxdesign.cc/feed' },
@@ -11,12 +13,7 @@ const FEEDS: { name: string; url: string }[] = [
   { name: 'Smashing Magazine – AI', url: 'https://www.smashingmagazine.com/tag/ai/feed/' }
 ];
 
-type Entry = {
-  title: string;
-  link: string;
-  date: Date;
-  source: string;
-};
+type Entry = { title: string; link: string; date: Date; source: string };
 
 const parser = new Parser({
   timeout: 15000,
@@ -29,13 +26,11 @@ async function getFeed(url: string, source: string): Promise<Entry[]> {
     return (feed.items || []).map((item) => ({
       title: (item.title || 'Untitled').trim(),
       link: item.link || '#',
-      date: item.isoDate ? new Date(item.isoDate)
-           : item.pubDate ? new Date(item.pubDate)
-           : new Date(0),
+      date: item.isoDate ? new Date(item.isoDate) :
+            item.pubDate ? new Date(item.pubDate) : new Date(0),
       source
     }));
-  } catch (e) {
-    console.error(`Failed fetching ${source}:`, e);
+  } catch {
     return [];
   }
 }
@@ -47,11 +42,9 @@ const entries = arrays.flat()
   .slice(0, 50);
 
 function fmt(d: Date) {
-  if (!d || isNaN(+d)) return '';
-  return d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });
+  return d && !isNaN(+d) ? d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '';
 }
 ---
-
 <!doctype html>
 <html lang="en">
   <head>
@@ -61,16 +54,11 @@ function fmt(d: Date) {
     <Header />
     <main style="max-width:960px;margin:0 auto;padding:2rem 1rem 4rem">
       <h1>🧠 AI × Design — Fresh Reads</h1>
-      <p style="opacity:.8;margin:.25rem 0 1.5rem">
-        Curated posts from top AI + Design sources. (Updates each deploy.)
-      </p>
-
+      <p style="opacity:.8;margin:.25rem 0 1.5rem">Curated posts from top AI + Design sources.</p>
       <ul style="list-style:none;margin:0;padding:0;display:grid;gap:1rem">
         {entries.map((e) => (
           <li style="padding:1rem;border:1px solid #e5e7eb;border-radius:12px;background:#fff">
-            <a href={e.link} target="_blank" rel="noopener noreferrer" style="font-weight:600;text-decoration:none">
-              {e.title}
-            </a>
+            <a href={e.link} target="_blank" rel="noopener noreferrer" style="font-weight:600;text-decoration:none">{e.title}</a>
             <div style="margin-top:.35rem;font-size:.9rem;opacity:.8;display:flex;gap:.5rem;align-items:center">
               <span style="padding:.15rem .5rem;border:1px solid #e5e7eb;border-radius:999px">{e.source}</span>
               <time datetime={e.date.toISOString()}>{fmt(e.date)}</time>
