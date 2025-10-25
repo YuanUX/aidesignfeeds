@@ -1,4 +1,6 @@
-name = "aidesignfeeds"
-main = "dist/_worker.js"
-compatibility_date = "2025-10-08"
-compatibility_flags = ["nodejs_compat"]
+name = "aidesignfeeds-scheduler"
+main = "functions/schedule.js"
+compatibility_date = "2025-10-25"
+
+[triggers]
+crons = ["0 16 * * *"]  # daily 9 AM PT; use "0 */6 * * *" for every 6 hours

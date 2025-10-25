@@ -1,15 +1,15 @@
 export default {
   async scheduled(controller, env, ctx) {
-    // Trigger a redeploy via Cloudflare Pages API
-    const response = await fetch(`https://api.cloudflare.com/client/v4/pages/projects/aidesignfeeds/deployments`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    console.log('Triggered redeploy:', response.status);
+    const DEPLOY_HOOK_URL = "https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/04db4e6d-5a74-4573-bb16-e01e42c58f72"; // your Deploy Hook URL
+
+    try {
+      const res = await fetch(DEPLOY_HOOK_URL, { method: "POST" });
+      console.log("✅ Triggered redeploy:", res.status);
+    } catch (err) {
+      console.error("❌ Failed to trigger deploy:", err);
+    }
   },
-  // Run once per day at 9 AM Pacific Time (16:00 UTC)
-  crons: ['0 16 * * *'],
+
+  // Run daily at 9 AM Pacific (16:00 UTC)
+  crons: ["0 16 * * *"],
 };
