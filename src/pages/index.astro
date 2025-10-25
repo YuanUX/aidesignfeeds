@@ -18,11 +18,35 @@ type Entry = {
   minutes?: number | null;
 };
 
-const FEEDS: { name: string; url: string }[] = [
+
+const PLACEHOLDER = '/placeholder.png';
+
+
+const FEEDS = [
+  // --- Design & UX ---
   { name: 'UX Collective', url: 'https://uxdesign.cc/feed' },
+  { name: 'Nielsen Norman Group', url: 'https://www.nngroup.com/articles/rss/' },
+  { name: 'Smashing Magazine – Design', url: 'https://www.smashingmagazine.com/category/design/feed/' },
+  { name: 'A List Apart', url: 'https://alistapart.com/main/feed/' },
+  { name: 'Sidebar.io', url: 'https://sidebar.io/feed.xml' },
+
+  // --- AI / Tech / Innovation ---
   { name: 'OpenAI Blog', url: 'https://openai.com/blog/rss.xml' },
   { name: 'Google AI Blog', url: 'https://ai.googleblog.com/feeds/posts/default?alt=rss' },
-  { name: 'Smashing Magazine – AI', url: 'https://www.smashingmagazine.com/tag/ai/feed/' },
+  { name: 'Anthropic Blog', url: 'https://www.anthropic.com/feed.xml' },
+  { name: 'Hugging Face Blog', url: 'https://huggingface.co/blog/feed.xml' },
+  { name: 'MIT Technology Review – AI', url: 'https://www.technologyreview.com/feed/topic/artificial-intelligence/' },
+
+  // --- Product & Design Systems ---
+  { name: 'Figma Blog', url: 'https://www.figma.com/blog/feed.xml' },
+  { name: 'Adobe Design Blog', url: 'https://blog.adobe.com/en/topics/design/rss.xml' },
+  { name: 'Google Design', url: 'https://design.google/library/feed.xml' },
+  { name: 'Spotify Design', url: 'https://spotify.design/rss.xml' },
+
+  // --- Future / Innovation ---
+  { name: 'Fast Company – Innovation', url: 'https://www.fastcompany.com/rss/section/innovation' },
+  { name: 'Wired AI', url: 'https://www.wired.com/feed/tag/ai/latest/rss' },
+  { name: 'The Verge – AI', url: 'https://www.theverge.com/rss/ai/index.xml' },
 ];
 
 const parser = new Parser({
@@ -92,29 +116,83 @@ function clampWords(s: string, max = 45): string {
 }
 
 
+// Resolve relative -> absolute using the page URL as base
+function resolveUrl(base: string, candidate?: string | null) {
+  try { return candidate ? new URL(candidate, base).toString() : null; } catch { return null; }
+}
+
+async function fetchOGImage(pageUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(pageUrl, {
+      headers: { 'User-Agent': 'aidesignfeeds.com (Astro build crawler)' },
+      redirect: 'follow',
+      // No need for referrer here; this is server-side fetch at build time
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // Try common meta tags in priority order
+    const grab = (prop: string, attr = 'property') => {
+      const re = new RegExp(`<meta[^>]+${attr}=["']${prop}["'][^>]*content=["']([^"']+)["']`, 'i');
+      const m = html.match(re);
+      return m?.[1] || null;
+    };
+
+    const candidates = [
+      grab('og:image'),
+      grab('og:image:secure_url'),
+      grab('twitter:image', 'name'),
+      // some sites:
+      grab('parsely-image', 'name'),
+      // fallback: first <img> in article (rough)
+      (html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1] ?? null),
+    ].filter(Boolean) as string[];
+
+    if (!candidates.length) return null;
+    // Resolve relative to the article URL
+    const abs = resolveUrl(pageUrl, candidates[0]);
+    return abs;
+  } catch {
+    return null;
+  }
+}
+
+
+const FETCH_CAP = 30; // don't over-fetch during build
+let fetchedCount = 0;
+
 async function getFeed(url: string, source: string): Promise<Entry[]> {
   try {
     const feed = await parser.parseURL(url);
-    return (feed.items || []).map((item: any) => {
-      const raw = textOnly(
-        item.contentSnippet || item.summary || item['content:encoded'] || item.content || ''
-      );
-      const summary = clampWords(raw, 45); // <-- limit words here
+    const items = feed.items || [];
+
+    return await Promise.all(items.map(async (item: any) => {
+      const raw = textOnly(item.contentSnippet || item.summary || item['content:encoded'] || item.content || '');
+      const summary = clampWords(raw, 45);
+
+      let image = pickImage(item);
+      if (!image && fetchedCount < FETCH_CAP && item.link) {
+        const og = await fetchOGImage(item.link);
+        if (og) image = og;
+        fetchedCount++;
+      }
+
       return {
         title: (item.title || 'Untitled').trim(),
         link: normalizeUrl(item.link || '#'),
         date: parseDate(item),
         source,
-        image: pickImage(item),
+        image: image || null,
         category: firstCategory(item),
         summary,
-        minutes: estimateMinutes(raw), // minutes from full text (better estimate)
+        minutes: estimateMinutes(raw),
       };
-    });
+    }));
   } catch {
     return [];
   }
 }
+
 
 
 const arrays = await Promise.all(FEEDS.map(f => getFeed(f.url, f.name)));
@@ -145,7 +223,7 @@ const HERO = entries[0];
 const LIST = entries.slice(1);
 
 // paginate list client-side
-const INITIAL_SIZE = 6; // show 6 under "Latest Stories" before load more
+const INITIAL_SIZE = 10; // show 10 under "Latest Stories" before load more
 const initial = LIST.slice(0, INITIAL_SIZE);
 const remaining = LIST.slice(INITIAL_SIZE);
 ---
@@ -194,7 +272,7 @@ const remaining = LIST.slice(INITIAL_SIZE);
           <div class="rounded-xl overflow-hidden border border-border bg-card">
             <a href={HERO.link} target="_blank" rel="noopener noreferrer" aria-label={`Open: ${HERO.title}`}>
               {HERO.image ? (
-                <img src={HERO.image} alt="" class="w-full aspect-[16/10] object-cover" loading="eager" decoding="async" />
+                <img src={HERO.image} alt="" class="w-full aspect-[16/10] object-cover" loading="eager" decoding="async" referrerpolicy="no-referrer"/>
               ) : (
                 <div class="w-full aspect-[16/10] bg-muted" />
               )}
@@ -242,17 +320,25 @@ const remaining = LIST.slice(INITIAL_SIZE);
                 rel="noopener noreferrer"
                 class="block rounded-lg overflow-hidden border border-border bg-card"
               >
-                {e.image ? (
-                  <img
-                    class="w-full h-full object-cover object-center"
-                    src={e.image}
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                  />
-                ) : (
-                  <div class="w-full h-[120px] bg-muted" />
-                )}
+              {e.image ? (
+                <img
+                  class="w-full h-full object-cover object-center"
+                  src={e.image}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  referrerpolicy="no-referrer"
+                />
+              ) : (
+                <img
+                  class="w-full h-full object-cover object-center"
+                  src={PLACEHOLDER}
+                  alt="Placeholder image"
+                  loading="lazy"
+                />
+              )}
+
+
               </a>
 
                 <div>
@@ -274,13 +360,17 @@ const remaining = LIST.slice(INITIAL_SIZE);
             ))}
           </ul>
 
-          {remaining.length > 0 && (
-            <div class="text-center mt-8">
-              <button id="load-more" class="inline-flex items-center rounded-full bg-primary text-primary-foreground px-5 py-2.5 font-semibold shadow-sm">
-                Load more ↓
-              </button>
-            </div>
-          )}
+        <div class="text-center mt-8">
+          <button
+            id="load-more"
+            class="inline-flex items-center rounded-full bg-primary text-primary-foreground px-5 py-2.5 font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-live="polite"
+          >
+            Loading…
+          </button>
+        </div>
+
+          
         </div>
 
         <!-- Sidebar -->
@@ -314,8 +404,10 @@ const remaining = LIST.slice(INITIAL_SIZE);
       </section>
 
       <!-- Pass the remaining items to the browser as JSON -->
-      <script id="remaining-json" type="application/json">
-        {JSON.stringify(remaining.map(e => ({
+
+
+      <script id="list-json" type="application/json">
+        {JSON.stringify(LIST.map(e => ({
           title: e.title,
           link: e.link,
           date: e.date.toISOString(),
@@ -328,28 +420,52 @@ const remaining = LIST.slice(INITIAL_SIZE);
       </script>
 
       <script type="module">
-        const btn = document.getElementById('load-more');
-        const list = document.getElementById('feed-list');
-        const dataEl = document.getElementById('remaining-json');
-        const remaining = JSON.parse(dataEl?.textContent || '[]');
+        const btn   = document.getElementById('load-more');
+        const list  = document.getElementById('feed-list');
+        const dataEl = document.getElementById('list-json');
 
-        const STEP = 6;
-        let shown = 0;
+        // Parse safely
+        let all = [];
+        try {
+          const raw = (dataEl?.textContent || '').trim();
+          all = raw ? JSON.parse(raw) : [];
+        } catch (e) {
+          console.error('[AIDesignFeeds] JSON parse failed:', e);
+          all = [];
+        }
+
+        const STEP = 10; // load 10 per click
+
+        // Count only direct <li> children (ignore comments/whitespace)
+        const getShown = () => list ? list.querySelectorAll(':scope > li').length : 0;
+        let shown = getShown();
+        let busy  = false;
+
+        function setBtnLabel() {
+          if (!btn) return;
+          const left = Math.max(0, all.length - shown);
+          btn.textContent = left > 0 ? `Load ${Math.min(STEP, left)} more ↓` : 'No more articles';
+          btn.disabled = left === 0;
+        }
 
         function itemHTML(e) {
           return `
             <li class="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-4 border-b border-[var(--border)] pb-6">
-              <a href="${e.link}" target="_blank" rel="noopener noreferrer" class="block rounded-lg overflow-hidden bg-[var(--card)] border border-[var(--border)]">
-                ${e.image ? `<img
-  class="w-full h-full object-cover object-center rounded-lg"
-  src="${e.image}"
-  alt=""
-  loading="lazy"
-  decoding="async"
-/>` : `<div class="w-full h-[120px] bg-[var(--muted)]"></div>`}
+              <a href="${e.link}" target="_blank" rel="noopener noreferrer"
+                class="block rounded-lg overflow-hidden bg-[var(--card)] border border-[var(--border)]">
+                ${
+                  e.image
+                    ? `<img class="w-full h-full object-cover object-center"
+                          src="${e.image}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+                    : `<div class="w-full h-[120px] bg-[var(--muted)]"></div>`
+                }
               </a>
               <div>
-                ${e.category ? `<span class="inline-flex items-center rounded-md border border-[var(--border)] px-2 py-1 text-xs uppercase tracking-wide bg-[var(--color-accent)] ext-[var(--accent-foreground)]">${e.category}</span>` : ``}
+                ${
+                  e.category
+                    ? `<span class="inline-flex items-center rounded-md border border-[var(--border)] px-2 py-1 text-xs uppercase tracking-wide bg-[var(--color-accent)] text-[var(--accent-foreground)]">${e.category}</span>`
+                    : ``
+                }
                 <h4 class="mt-2 text-xl font-semibold leading-snug">
                   <a class="hover:underline" href="${e.link}" target="_blank" rel="noopener noreferrer">${e.title}</a>
                 </h4>
@@ -357,9 +473,9 @@ const remaining = LIST.slice(INITIAL_SIZE);
                 <div class="mt-3 flex items-center gap-3 text-sm" style="color:var(--color-muted-foreground)">
                   <span class="inline-flex items-center rounded-full border border-[var(--border)] px-2 py-0.5">${e.source}</span>
                   <time datetime="${e.date}">
-                    ${new Date(e.date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}
+                    ${new Date(e.date).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' })}
                   </time>
-                  ${e.minutes ? `<span aria-hidden>•</span><span>${e.minutes} min read</span>` : ``}
+                  ${e.minutes ? `<span aria-hidden="true">•</span><span>${e.minutes} min read</span>` : ``}
                 </div>
               </div>
             </li>
@@ -367,16 +483,47 @@ const remaining = LIST.slice(INITIAL_SIZE);
         }
 
         function renderMore() {
-          const slice = remaining.slice(shown, shown + STEP);
-          const frag = document.createElement('template');
-          frag.innerHTML = slice.map(itemHTML).join('');
-          list.appendChild(frag.content);
-          shown += slice.length;
-          if (shown >= remaining.length && btn) btn.style.display = 'none';
+          if (busy || !list) return;
+          busy = true;
+
+          try {
+            // Recompute in case something else inserted items
+            shown = getShown();
+
+            // Compute the next slice safely
+            const start = shown;
+            const end   = Math.min(start + STEP, all.length);
+
+            if (start >= end) {
+              setBtnLabel();
+              return;
+            }
+
+            const next = all.slice(start, end);
+            const tpl = document.createElement('template');
+            tpl.innerHTML = next.map(itemHTML).join('');
+            list.appendChild(tpl.content);
+
+            shown = end; // we just appended (end - start) items
+            setBtnLabel();
+          } catch (err) {
+            console.error('[AIDesignFeeds] renderMore error:', err);
+          } finally {
+            busy = false;
+          }
         }
 
-        if (btn) btn.addEventListener('click', renderMore);
+        // init
+        setBtnLabel();
+        btn?.addEventListener('click', renderMore);
+
+        // quick debug so you can see counts in DevTools
+        console.debug('[AIDesignFeeds] totals:', {
+          initialShown: shown,
+          allItems: all.length
+        });
       </script>
+
     </main>
     <Footer />
   </body>
