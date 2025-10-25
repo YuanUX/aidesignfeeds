@@ -18,8 +18,12 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview"
-  },
+  }
+  
+  
+  ,
   "devDependencies": {
+    "@astrojs/cloudflare": "^12.6.10",
     "@astrojs/tailwind": "^6.0.2",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
