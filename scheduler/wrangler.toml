@@ -1,0 +1,11 @@
+name = "aidesignfeeds-scheduler"
+main = "worker.js"
+compatibility_date = "2024-09-25"
+
+[triggers]
+# Run daily at 12 AM Pacific (≈07:00 UTC)
+crons = ["0 7 * * *"]
+
+[vars]
+# Optional — for local testing; better to set in Dashboard as a secret
+DEPLOY_HOOK_URL = "https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/04db4e6d-5a74-4573-bb16-e01e42c58f72"

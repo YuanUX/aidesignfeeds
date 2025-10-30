@@ -199,8 +199,9 @@ const arrays = await Promise.all(FEEDS.map(f => getFeed(f.url, f.name)));
 
 // de-dupe
 const seen = new Set<string>();
-const all = arrays.flat()
-  .filter(e => e.link && e.title)
+const all = arrays
+  .flat()
+  .filter(e => e.link && e.title && e.image)        // 👈 skip entries without image
   .filter(e => {
     const key = `${e.title.toLowerCase()}::${e.link}`;
     if (seen.has(key)) return false;
@@ -223,7 +224,7 @@ const HERO = entries[0];
 const LIST = entries.slice(1);
 
 // paginate list client-side
-const INITIAL_SIZE = 10; // show 10 under "Latest Stories" before load more
+const INITIAL_SIZE = 15; // show 10 under "Latest Stories" before load more
 const initial = LIST.slice(0, INITIAL_SIZE);
 const remaining = LIST.slice(INITIAL_SIZE);
 ---
@@ -242,7 +243,14 @@ const remaining = LIST.slice(INITIAL_SIZE);
     <!-- Top rail -->
     <div class="w-full bg-primary text-primary-foreground">
       <div class="mx-auto max-w-6xl px-4 py-2 text-xs flex items-center gap-6 justify-between">
-        <div class="opacity-90">Monday, {new Date().toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' })}</div>
+      <div class="opacity-90">
+        {new Date().toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric'
+        })}
+      </div>
         <div class="opacity-90">Vol. 1, Issue {String(new Date().getDate()).padStart(2,'0')}</div>
       </div>
     </div>
@@ -311,63 +319,70 @@ const remaining = LIST.slice(INITIAL_SIZE);
         <!-- List -->
         <div class="lg:col-span-2">
           <h3 class="text-2xl font-semibold mb-6">Latest Stories</h3>
-          <ul id="feed-list" class="space-y-6">
-            {initial.map((e) => (
-              <li class="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-4 border-b border-border pb-6">
+        <ul id="feed-list" class="space-y-6">
+          {initial.map((e) => (
+            <li data-article class="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-4 border-b border-border pb-6">
               <a
                 href={e.link}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="block rounded-lg overflow-hidden border border-border bg-card"
               >
-              {e.image ? (
-                <img
-                  class="w-full h-full object-cover object-center"
-                  src={e.image}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  referrerpolicy="no-referrer"
-                />
-              ) : (
-                <img
-                  class="w-full h-full object-cover object-center"
-                  src={PLACEHOLDER}
-                  alt="Placeholder image"
-                  loading="lazy"
-                />
-              )}
-
-
+                {e.image ? (
+                  <img
+                    class="w-full h-full object-cover object-center"
+                    src={e.image}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    referrerpolicy="no-referrer"
+                  />
+                ) : (
+                  <div class="w-full h-[140px] bg-muted" />
+                )}
               </a>
 
-                <div>
-                  {e.category && (
-                    <span class="inline-flex items-center rounded-md border border-border px-2 py-1 text-xs uppercase tracking-wide bg-accent text-accent-foreground">{e.category}</span>
-                  )}
-                  <h4 class="mt-2 text-xl font-semibold leading-snug">
-                    <a class="hover:underline" href={e.link} target="_blank" rel="noopener noreferrer">{e.title}</a>
-                  </h4>
-                  {e.summary && <p class="mt-2 text-muted-foreground">{e.summary}</p>}
-                  <div class="mt-3 flex items-center gap-3 text-sm text-muted-foreground">
-                    <span class="inline-flex items-center rounded-full border border-border px-2 py-0.5">{e.source}</span>
-                    <time datetime={e.date.toISOString()}>{fmtDate(e.date)}</time>
-                    {e.minutes && <span aria-hidden>•</span>}
-                    {e.minutes && <span>{e.minutes} min read</span>}
-                  </div>
+              <div>
+                {e.category && (
+                  <span class="inline-flex items-center rounded-md border border-border px-2 py-1 text-xs uppercase tracking-wide bg-accent text-accent-foreground">
+                    {e.category}
+                  </span>
+                )}
+                <h4 class="mt-2 text-xl font-semibold leading-snug">
+                  <a class="hover:underline" href={e.link} target="_blank" rel="noopener noreferrer">
+                    {e.title}
+                  </a>
+                </h4>
+                {e.summary && <p class="mt-2 text-muted-foreground">{e.summary}</p>}
+                <div class="mt-3 flex items-center gap-3 text-sm text-muted-foreground">
+                  <span class="inline-flex items-center rounded-full border border-border px-2 py-0.5">{e.source}</span>
+                  <time datetime={e.date.toISOString()}>{fmtDate(e.date)}</time>
+                  {e.minutes && <span aria-hidden>•</span>}
+                  {e.minutes && <span>{e.minutes} min read</span>}
                 </div>
-              </li>
-            ))}
-          </ul>
+              </div>
+            </li>
+          ))}
+        </ul>
 
         <div class="text-center mt-8">
-          <button
-            id="load-more"
-            class="inline-flex items-center rounded-full bg-primary text-primary-foreground px-5 py-2.5 font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-live="polite"
-          >
-            Loading…
-          </button>
+          {remaining.length ? (
+            <button
+              id="load-more"
+              class="inline-flex items-center rounded-full bg-primary text-primary-foreground px-5 py-2.5 font-semibold shadow-sm"
+              aria-live="polite"
+            >
+              Load {Math.min(10, remaining.length)} more ↓
+            </button>
+          ) : (
+            <button
+              id="load-more"
+              class="inline-flex items-center rounded-full bg-primary text-primary-foreground px-5 py-2.5 font-semibold shadow-sm"
+              disabled
+            >
+              No more articles
+            </button>
+          )}
         </div>
 
           
@@ -390,7 +405,7 @@ const remaining = LIST.slice(INITIAL_SIZE);
             <h5 class="text-lg font-semibold">Trending Now</h5>
             <ol class="mt-4 space-y-3">
               {entries.slice(0, 2).map((e, i) => (
-                <li class="flex items-start gap-3">
+                <li data-article class="flex items-start gap-3">
                   <span class="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-secondary-foreground text-sm font-semibold">{i+1}</span>
                   <div class="min-w-0">
                     <a href={e.link} target="_blank" rel="noopener noreferrer" class="hover:underline font-medium">{e.title}</a>
@@ -406,7 +421,7 @@ const remaining = LIST.slice(INITIAL_SIZE);
       <!-- Pass the remaining items to the browser as JSON -->
 
 
-      <script id="list-json" type="application/json">
+      <template id="list-json">
         {JSON.stringify(LIST.map(e => ({
           title: e.title,
           link: e.link,
@@ -417,40 +432,35 @@ const remaining = LIST.slice(INITIAL_SIZE);
           summary: e.summary || null,
           minutes: e.minutes || null,
         })))}
-      </script>
+      </template>
+
+
 
       <script type="module">
         const btn   = document.getElementById('load-more');
         const list  = document.getElementById('feed-list');
         const dataEl = document.getElementById('list-json');
-
-        // Parse safely
         let all = [];
         try {
           const raw = (dataEl?.textContent || '').trim();
           all = raw ? JSON.parse(raw) : [];
         } catch (e) {
           console.error('[AIDesignFeeds] JSON parse failed:', e);
+          console.debug('[AIDesignFeeds] first 200 chars:', (dataEl?.textContent || '').slice(0, 200));
           all = [];
         }
 
         const STEP = 10; // load 10 per click
 
-        // Count only direct <li> children (ignore comments/whitespace)
-        const getShown = () => list ? list.querySelectorAll(':scope > li').length : 0;
+        // ✅ Count only <li data-article>
+        const getShown = () => list ? list.querySelectorAll(':scope > [data-article]').length : 0;
         let shown = getShown();
         let busy  = false;
 
-        function setBtnLabel() {
-          if (!btn) return;
-          const left = Math.max(0, all.length - shown);
-          btn.textContent = left > 0 ? `Load ${Math.min(STEP, left)} more ↓` : 'No more articles';
-          btn.disabled = left === 0;
-        }
-
+        // ✅ Use data-article to ensure counting works
         function itemHTML(e) {
           return `
-            <li class="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-4 border-b border-[var(--border)] pb-6">
+            <li data-article class="grid grid-cols-1 sm:grid-cols-[240px_1fr] gap-4 border-b border-[var(--border)] pb-6">
               <a href="${e.link}" target="_blank" rel="noopener noreferrer"
                 class="block rounded-lg overflow-hidden bg-[var(--card)] border border-[var(--border)]">
                 ${
@@ -482,15 +492,22 @@ const remaining = LIST.slice(INITIAL_SIZE);
           `;
         }
 
+        function setBtnLabel() {
+          if (!btn) return;
+          const left = Math.max(0, all.length - shown);
+          btn.textContent = left > 0
+            ? `Load more ↓`
+            : 'No more articles';
+          btn.disabled = left == 0;
+        }
+
         function renderMore() {
           if (busy || !list) return;
           busy = true;
 
           try {
-            // Recompute in case something else inserted items
-            shown = getShown();
+            shown = getShown(); // recheck how many <li data-article> we have
 
-            // Compute the next slice safely
             const start = shown;
             const end   = Math.min(start + STEP, all.length);
 
@@ -504,7 +521,7 @@ const remaining = LIST.slice(INITIAL_SIZE);
             tpl.innerHTML = next.map(itemHTML).join('');
             list.appendChild(tpl.content);
 
-            shown = end; // we just appended (end - start) items
+            shown = end;
             setBtnLabel();
           } catch (err) {
             console.error('[AIDesignFeeds] renderMore error:', err);
@@ -513,11 +530,22 @@ const remaining = LIST.slice(INITIAL_SIZE);
           }
         }
 
-        // init
-        setBtnLabel();
-        btn?.addEventListener('click', renderMore);
+        // ✅ init
+        // ✅ wait until DOM is ready to ensure elements are rendered
+        document.addEventListener('DOMContentLoaded', () => {
+          shown = getShown();
+          setBtnLabel();
+          btn?.addEventListener('click', renderMore);
 
-        // quick debug so you can see counts in DevTools
+          // 🧩 debug counts
+          console.debug('[AIDesignFeeds] getShown():', getShown(), 'all.length:', all.length);
+          console.debug('[AIDesignFeeds] totals:', {
+            initialShown: shown,
+            allItems: all.length
+          });
+        });
+
+
         console.debug('[AIDesignFeeds] totals:', {
           initialShown: shown,
           allItems: all.length
